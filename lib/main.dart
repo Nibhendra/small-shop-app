@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
 import 'package:shop_app/providers/user_provider.dart';
 import 'package:shop_app/providers/sales_provider.dart';
+import 'package:shop_app/providers/credit_provider.dart';
 
 import 'package:shop_app/providers/inventory_provider.dart';
 import 'package:shop_app/screens/login_screen.dart';
@@ -12,77 +13,125 @@ import 'package:shop_app/screens/add_sale_screen.dart';
 import 'package:shop_app/screens/profile_onboarding_screen.dart';
 import 'package:shop_app/screens/profile_screen.dart';
 import 'package:shop_app/screens/splash_screen.dart';
+import 'package:shop_app/screens/customer_ledger_screen.dart';
 import 'package:shop_app/services/firestore_service.dart';
 import 'package:shop_app/services/local_store.dart';
+import 'package:shop_app/services/connectivity_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LocalStore.init();
+  
   try {
     await Firebase.initializeApp();
   } catch (e) {
     debugPrint("CRITICAL FIREBASE INIT ERROR: $e");
   }
+  
+  // Initialize connectivity monitoring AFTER Firebase
+  await ConnectivityService().init();
+  
   runApp(const MyApp());
 }
 
-class AuthGate extends StatelessWidget {
+class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  bool? _profileComplete;
+  bool _isLoading = true;
+  String? _currentUid;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAuth();
+  }
+
+  void _checkAuth() {
+    FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (user == null) {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _profileComplete = null;
+            _currentUid = null;
+          });
         }
+      } else if (user.uid != _currentUid) {
+        _currentUid = user.uid;
+        _loadProfile(user);
+      }
+    });
+  }
 
-        if (snapshot.data == null) {
-          return const LoginScreen();
-        }
+  Future<void> _loadProfile(User user) async {
+    if (mounted) {
+      setState(() => _isLoading = true);
+    }
 
-        // Ensure profile exists (non-blocking best-effort)
-        FirestoreService().ensureUserProfile();
+    try {
+      // Ensure profile document exists
+      await FirestoreService().ensureUserProfile();
+      
+      // Fetch profile from Firestore
+      final profile = await FirestoreService().getUserProfile();
+      debugPrint('AuthGate: Fetched profile for ${user.uid}: $profile');
 
-        return FutureBuilder<Map<String, dynamic>?>(
-          future: FirestoreService().getUserProfile(),
-          builder: (context, profileSnap) {
-            if (profileSnap.connectionState == ConnectionState.waiting) {
-              return const Scaffold(
-                body: Center(child: CircularProgressIndicator()),
-              );
-            }
+      final complete = FirestoreService.isProfileComplete(profile);
+      debugPrint('AuthGate: Profile complete = $complete');
 
-            final user = FirebaseAuth.instance.currentUser;
-            final profile = profileSnap.data;
-
-            if (user != null) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (!context.mounted) return;
-                Provider.of<UserProvider>(context, listen: false).setFromFirebase(
-                  uid: user.uid,
-                  displayName: profile?['name']?.toString() ?? user.displayName,
-                  email: (profile?['email'] ?? user.email)?.toString(),
-                  phone: (profile?['phone'] ?? user.phoneNumber)?.toString(),
-                  shopName: profile?['shop_name']?.toString(),
-                  gender: profile?['gender']?.toString(),
-                  address: profile?['address']?.toString(),
-                );
-              });
-            }
-
-            final complete = FirestoreService.isProfileComplete(profile);
-            if (!complete) {
-              return const ProfileOnboardingScreen();
-            }
-            return const HomeScreen();
-          },
+      if (mounted) {
+        // Update UserProvider
+        Provider.of<UserProvider>(context, listen: false).setFromFirebase(
+          uid: user.uid,
+          displayName: profile?['name']?.toString() ?? user.displayName,
+          email: (profile?['email'] ?? user.email)?.toString(),
+          phone: (profile?['phone'] ?? user.phoneNumber)?.toString(),
+          shopName: profile?['shop_name']?.toString(),
+          gender: profile?['gender']?.toString(),
+          address: profile?['address']?.toString(),
         );
-      },
-    );
+
+        setState(() {
+          _profileComplete = complete;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('AuthGate: Error loading profile: $e');
+      if (mounted) {
+        setState(() {
+          _profileComplete = false;
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (user == null) {
+      return const LoginScreen();
+    }
+
+    if (_profileComplete == true) {
+      return const HomeScreen();
+    }
+
+    return const ProfileOnboardingScreen();
   }
 }
 
@@ -96,6 +145,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => UserProvider()),
         ChangeNotifierProvider(create: (_) => SalesProvider()),
         ChangeNotifierProvider(create: (_) => InventoryProvider()),
+        ChangeNotifierProvider(create: (_) => CreditProvider()),
       ],
       child: MaterialApp(
         title: 'Vyapaar',
@@ -120,6 +170,7 @@ class MyApp extends StatelessWidget {
           '/add-sale': (context) => const AddSaleScreen(),
           '/onboarding': (context) => const ProfileOnboardingScreen(),
           '/profile': (context) => const ProfileScreen(),
+          '/ledger': (context) => const CustomerLedgerScreen(),
         },
       ),
     );

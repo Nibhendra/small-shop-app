@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:shop_app/services/local_store.dart';
 import 'package:shop_app/services/otp_backend_service.dart';
 import 'package:shop_app/utils/app_theme.dart';
 import 'package:shop_app/widgets/custom_button.dart';
@@ -67,15 +68,34 @@ class _BackendOtpVerificationScreenState
 
       await FirebaseAuth.instance.signInWithCustomToken(token);
 
+      // If WhatsApp channel, mark this phone as having successfully joined Twilio sandbox
+      // so user won't be asked to join again next time
+      if (widget.channel == 'whatsapp') {
+        await LocalStore.setTwilioJoined(widget.phoneNumber);
+      }
+
       if (!mounted) return;
       Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
     } catch (e) {
       if (!mounted) return;
+      String errorMessage = e.toString();
+      
+      // Parse common errors for better user messages
+      if (errorMessage.contains('Invalid') || errorMessage.contains('invalid')) {
+        errorMessage = 'Invalid OTP code. Please check and try again.';
+      } else if (errorMessage.contains('expired') || errorMessage.contains('Expired')) {
+        errorMessage = 'OTP has expired. Please request a new one.';
+      } else if (errorMessage.contains('StateError')) {
+        // Remove "StateError: " prefix if present
+        errorMessage = errorMessage.replaceAll('StateError: ', '');
+      }
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Verification failed: $e'),
+          content: Text('Verification failed: $errorMessage'),
           backgroundColor: AppTheme.errorColor,
           behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 5),
         ),
       );
     } finally {

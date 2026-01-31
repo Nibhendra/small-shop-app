@@ -4,8 +4,11 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:provider/provider.dart';
 import 'package:shop_app/providers/user_provider.dart';
 import 'package:shop_app/providers/sales_provider.dart';
+import 'package:shop_app/providers/credit_provider.dart';
 import 'package:shop_app/screens/home_view.dart';
 import 'package:shop_app/widgets/profile_settings_dialog.dart';
+import 'package:shop_app/services/connectivity_service.dart';
+import 'package:shop_app/services/offline_sync_service.dart';
 
 import 'package:shop_app/screens/inventory_screen.dart';
 import 'package:shop_app/utils/app_theme.dart';
@@ -19,6 +22,11 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
+  bool _isOnline = true;
+  int _pendingCount = 0;
+  
+  // Stream subscription for connectivity changes
+  late final dynamic _connectivitySubscription;
 
   final List<Widget> _views = [
     const HomeView(),
@@ -31,7 +39,36 @@ class _HomeScreenState extends State<HomeScreen> {
     // Load data once when the main screen initializes
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Provider.of<SalesProvider>(context, listen: false).loadData();
+      Provider.of<CreditProvider>(context, listen: false).loadCustomers();
+      _checkConnectivity();
     });
+
+    // Listen to connectivity changes
+    _connectivitySubscription = ConnectivityService().onConnectivityChanged.listen((isOnline) {
+      if (mounted) {
+        setState(() => _isOnline = isOnline);
+        _updatePendingCount();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _connectivitySubscription.cancel();
+    super.dispose();
+  }
+
+  Future<void> _checkConnectivity() async {
+    _isOnline = ConnectivityService().isOnline;
+    await _updatePendingCount();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _updatePendingCount() async {
+    final count = await OfflineSyncService().pendingCount();
+    if (mounted) {
+      setState(() => _pendingCount = count);
+    }
   }
 
   @override
@@ -55,10 +92,74 @@ class _HomeScreenState extends State<HomeScreen> {
         elevation: 0,
         centerTitle: false,
         actions: [
+          // Offline/Sync indicator
+          if (!_isOnline || _pendingCount > 0)
+            Container(
+              margin: const EdgeInsets.only(right: 8),
+              child: Chip(
+                backgroundColor: !_isOnline
+                    ? Colors.orange.withValues(alpha: 0.2)
+                    : AppTheme.primaryColor.withValues(alpha: 0.2),
+                avatar: Icon(
+                  !_isOnline ? Icons.cloud_off : Icons.sync,
+                  size: 16,
+                  color: !_isOnline ? Colors.orange : AppTheme.primaryColor,
+                ),
+                label: Text(
+                  !_isOnline ? 'Offline' : '$_pendingCount pending',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: !_isOnline ? Colors.orange : AppTheme.primaryColor,
+                  ),
+                ),
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
+          // Ledger/Udhaar button
+          IconButton(
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.account_balance_wallet_outlined, color: AppTheme.primaryColor),
+                Consumer<CreditProvider>(
+                  builder: (context, provider, _) {
+                    if (provider.totalDue > 0) {
+                      return Positioned(
+                        right: -6,
+                        top: -6,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: const BoxDecoration(
+                            color: AppTheme.errorColor,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Text(
+                            '${provider.customersWithDue.length}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  },
+                ),
+              ],
+            ),
+            onPressed: () {
+              Navigator.pushNamed(context, '/ledger');
+            },
+            tooltip: 'Customer Ledger (Udhaar)',
+          ),
           IconButton(
             icon: const Icon(Icons.refresh, color: AppTheme.primaryColor),
             onPressed: () {
               Provider.of<SalesProvider>(context, listen: false).loadData();
+              Provider.of<CreditProvider>(context, listen: false).loadCustomers();
+              _updatePendingCount();
             },
           ),
           PopupMenuButton<String>(

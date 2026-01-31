@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shop_app/providers/sales_provider.dart';
+import 'package:shop_app/providers/credit_provider.dart';
 import 'package:shop_app/utils/app_theme.dart';
 import 'package:shop_app/widgets/dashboard_card.dart';
 import 'package:intl/intl.dart';
@@ -71,6 +72,30 @@ class HomeView extends StatelessWidget {
                           color: const Color(0xFF8C52FF),
                           subtitle: "Orders today",
                         ),
+                      ),
+                      const SizedBox(width: 16),
+                      // Credit/Udhaar Card
+                      Consumer<CreditProvider>(
+                        builder: (context, creditProvider, _) {
+                          return SizedBox(
+                            width: 250,
+                            child: GestureDetector(
+                              onTap: () => Navigator.pushNamed(context, '/ledger'),
+                              child: DashboardCard(
+                                title: "Udhaar/Credit",
+                                value:
+                                    "₹ ${creditProvider.totalDue.toStringAsFixed(0)}",
+                                icon: Icons.account_balance_wallet,
+                                color: creditProvider.totalDue > 0
+                                    ? const Color(0xFFE53935)
+                                    : const Color(0xFF43A047),
+                                subtitle: creditProvider.customersWithDue.isEmpty
+                                    ? "No pending dues"
+                                    : "${creditProvider.customersWithDue.length} customers owe",
+                              ),
+                            ),
+                          );
+                        },
                       ),
                     ],
                   ),
@@ -194,29 +219,62 @@ class HomeView extends StatelessWidget {
                               leading: Container(
                                 padding: const EdgeInsets.all(10),
                                 decoration: BoxDecoration(
-                                  color: AppTheme.primaryColor.withValues(
-                                    alpha: 0.05,
-                                  ),
+                                  color: sale['is_credit'] == true
+                                      ? AppTheme.errorColor.withValues(alpha: 0.1)
+                                      : sale['payment_mode'] == 'UPI'
+                                          ? Colors.green.withValues(alpha: 0.1)
+                                          : AppTheme.primaryColor.withValues(alpha: 0.05),
                                   shape: BoxShape.circle,
                                 ),
                                 child: Icon(
-                                  sale['payment_mode'] == 'UPI'
-                                      ? Icons.qr_code
-                                      : sale['payment_mode'] == 'Card'
-                                      ? Icons.credit_card
-                                      : Icons.money,
-                                  color: AppTheme.primaryColor,
+                                  sale['is_credit'] == true
+                                      ? Icons.access_time
+                                      : sale['payment_mode'] == 'UPI'
+                                          ? Icons.qr_code
+                                          : sale['payment_mode'] == 'Card'
+                                              ? Icons.credit_card
+                                              : Icons.money,
+                                  color: sale['is_credit'] == true
+                                      ? AppTheme.errorColor
+                                      : sale['payment_mode'] == 'UPI'
+                                          ? Colors.green
+                                          : AppTheme.primaryColor,
                                   size: 20,
                                 ),
                               ),
-                              title: Text(
-                                sale['description']?.toString().isNotEmpty ==
-                                        true
-                                    ? sale['description']
-                                    : "Sale",
-                                style: AppTheme.bodyStyle.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                ),
+                              title: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      sale['description']?.toString().isNotEmpty ==
+                                              true
+                                          ? sale['description']
+                                          : "Sale",
+                                      style: AppTheme.bodyStyle.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                  if (sale['is_credit'] == true)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 2,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.errorColor.withValues(alpha: 0.1),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: const Text(
+                                        'CREDIT',
+                                        style: TextStyle(
+                                          color: AppTheme.errorColor,
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                               subtitle: Text(
                                 "${sale['platform'] ?? 'Offline'} • ${DateFormat('MMM d, h:mm a').format(_asDateTime(sale['created_at']))}",
