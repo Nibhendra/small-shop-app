@@ -310,11 +310,19 @@ class _HomeScreenState extends State<HomeScreen> {
                 context,
                 listen: false,
               );
+              final creditProvider = Provider.of<CreditProvider>(
+                context,
+                listen: false,
+              );
               final result = await Navigator.pushNamed(context, '/add-sale');
               if (result == true) {
                 salesProvider.loadData();
+                creditProvider.loadCustomers(); // Reload credit customers after sale
               }
             } else if (index == 3) {
+              // Udhaar (Credit Ledger)
+              await Navigator.pushNamed(context, '/ledger');
+            } else if (index == 4) {
               await Navigator.pushNamed(context, '/profile');
             } else {
               setState(() => _currentIndex = index);
@@ -345,6 +353,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 size: 32,
               ),
               label: 'Add Sale',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.account_balance_wallet_outlined),
+              selectedIcon: Icon(
+                Icons.account_balance_wallet,
+                color: AppTheme.primaryColor,
+              ),
+              label: 'Udhaar',
             ),
             NavigationDestination(
               icon: Icon(Icons.person_outline),

@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:shop_app/models/customer_model.dart';
 import 'package:shop_app/providers/credit_provider.dart';
 import 'package:shop_app/screens/customer_detail_screen.dart';
-import 'package:shop_app/services/whatsapp_service.dart';
 import 'package:shop_app/utils/app_theme.dart';
 
 class CustomerLedgerScreen extends StatefulWidget {
@@ -44,6 +43,10 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen>
     }).toList();
   }
 
+  Future<void> _refreshData() async {
+    await Provider.of<CreditProvider>(context, listen: false).loadCustomers();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -52,6 +55,13 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen>
         title: Text('Customer Ledger (Udhaar)', style: AppTheme.headingStyle.copyWith(fontSize: 20)),
         backgroundColor: Colors.transparent,
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: AppTheme.primaryColor),
+            onPressed: _refreshData,
+            tooltip: 'Refresh',
+          ),
+        ],
         bottom: TabBar(
           controller: _tabController,
           labelColor: AppTheme.primaryColor,
@@ -145,12 +155,6 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen>
           );
         },
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _sendBulkReminders,
-        backgroundColor: Colors.green,
-        icon: const Icon(Icons.send, color: Colors.white),
-        label: const Text('Send Reminders', style: TextStyle(color: Colors.white)),
-      ),
     );
   }
 
@@ -211,13 +215,17 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen>
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () {
-          Navigator.push(
+        onTap: () async {
+          final result = await Navigator.push(
             context,
             MaterialPageRoute(
               builder: (_) => CustomerDetailScreen(customer: customer),
             ),
           );
+          // Auto-refresh when returning from customer detail
+          if (result == true || mounted) {
+            _refreshData();
+          }
         },
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -275,83 +283,10 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen>
                     ),
                 ],
               ),
-              const SizedBox(width: 8),
-              if (customer.hasDue)
-                IconButton(
-                  icon: const Icon(Icons.send, color: Colors.green, size: 20),
-                  onPressed: () => _sendReminder(customer),
-                  tooltip: 'Send WhatsApp Reminder',
-                ),
             ],
           ),
         ),
       ),
     );
-  }
-
-  Future<void> _sendReminder(Customer customer) async {
-    final sent = await WhatsAppService.sendPaymentReminder(
-      phone: customer.phone,
-      customerName: customer.name,
-      amount: customer.balanceDue,
-    );
-
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          sent
-              ? 'WhatsApp opened for ${customer.name}'
-              : 'Could not open WhatsApp',
-        ),
-        backgroundColor: sent ? Colors.green : AppTheme.errorColor,
-      ),
-    );
-  }
-
-  Future<void> _sendBulkReminders() async {
-    final provider = Provider.of<CreditProvider>(context, listen: false);
-    final customersWithDue = provider.customersWithDue;
-
-    if (customersWithDue.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No customers with pending dues')),
-      );
-      return;
-    }
-
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Send Reminders'),
-        content: Text(
-          'Send WhatsApp payment reminders to ${customersWithDue.length} customers?\n\n'
-          'Note: You will need to send each message manually.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Continue'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true || !mounted) return;
-
-    for (final customer in customersWithDue) {
-      await WhatsAppService.sendPaymentReminder(
-        phone: customer.phone,
-        customerName: customer.name,
-        amount: customer.balanceDue,
-      );
-      // Small delay between opens
-      await Future.delayed(const Duration(milliseconds: 500));
-    }
   }
 }

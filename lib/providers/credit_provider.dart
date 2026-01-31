@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shop_app/models/customer_model.dart';
 import 'package:shop_app/services/firestore_service.dart';
@@ -60,16 +61,24 @@ class CreditProvider extends ChangeNotifier {
     required double amount,
     String? note,
   }) async {
+    debugPrint('=== CreditProvider.recordPayment called ===');
+    debugPrint('Customer ID: $customerId');
+    debugPrint('Amount: $amount');
+    debugPrint('Note: $note');
+    
     _isLoading = true;
     notifyListeners();
 
     try {
+      debugPrint('Calling firestore.recordCustomerPayment...');
       await _firestore.recordCustomerPayment(
         customerId: customerId,
         amount: amount,
         note: note,
       );
+      debugPrint('Firestore payment recorded, now loading customers...');
       await loadCustomers(); // Refresh the list
+      debugPrint('Customers reloaded successfully');
     } on FirebaseException catch (e) {
       // Offline fallback - queue the payment for later sync
       if (e.code == 'unavailable' || e.code == 'network-request-failed') {

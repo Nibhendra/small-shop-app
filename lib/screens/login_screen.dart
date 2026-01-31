@@ -463,13 +463,14 @@ class _LoginScreenState extends State<LoginScreen> {
                           : () => _startOtp(channel: 'whatsapp'),
                       icon: Icons.chat_bubble_outline,
                     ),
-                    const SizedBox(height: 12),
-                    CustomButton(
-                      text: "Send OTP by SMS (Firebase)",
-                      isLoading: _isLoading,
-                      onPressed: _isLoading ? null : _startFirebaseSmsOtp,
-                      icon: Icons.sms_outlined,
-                    ),
+                    // SMS OTP button hidden - Firebase Phone Auth requires additional setup
+                    // const SizedBox(height: 12),
+                    // CustomButton(
+                    //   text: "Send OTP by SMS (Firebase)",
+                    //   isLoading: _isLoading,
+                    //   onPressed: _isLoading ? null : _startFirebaseSmsOtp,
+                    //   icon: Icons.sms_outlined,
+                    // ),
                   ],
                 ),
               ),

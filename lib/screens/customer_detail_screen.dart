@@ -1,11 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:shop_app/models/customer_model.dart';
 import 'package:shop_app/providers/credit_provider.dart';
+import 'package:shop_app/providers/sales_provider.dart';
 import 'package:shop_app/services/firestore_service.dart';
-import 'package:shop_app/services/whatsapp_service.dart';
 import 'package:shop_app/utils/app_theme.dart';
 import 'package:shop_app/widgets/custom_button.dart';
 import 'package:shop_app/widgets/custom_textfield.dart';
@@ -36,17 +37,37 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     setState(() => _isLoading = true);
 
     try {
+      debugPrint('=== Loading customer detail ===');
+      debugPrint('Customer ID: ${widget.customer.id}');
+      debugPrint('Customer Name: ${widget.customer.name}');
+      debugPrint('Customer Phone: ${widget.customer.phone}');
+      
       // Refresh customer data
       final customerData = await _firestore.getCustomer(widget.customer.id);
+      debugPrint('Customer data from Firestore: $customerData');
       if (customerData != null) {
         _currentCustomer = Customer.fromMap(customerData, id: customerData['id'] as String);
+        debugPrint('Current customer balance: ${_currentCustomer?.balanceDue}');
       }
 
       // Load ledger
+      debugPrint('Loading ledger for customer ID: ${widget.customer.id}');
       final ledgerData = await _firestore.watchCustomerLedger(widget.customer.id).first;
-      _ledger = ledgerData.map((m) => LedgerEntry.fromMap(m, id: m['id'] as String)).toList();
-    } catch (e) {
+      debugPrint('Raw ledger data: $ledgerData');
+      debugPrint('Ledger count: ${ledgerData.length}');
+      
+      _ledger = ledgerData.map((m) {
+        debugPrint('Parsing ledger entry: $m');
+        return LedgerEntry.fromMap(m, id: m['id'] as String);
+      }).toList();
+      
+      debugPrint('Parsed ledger entries: ${_ledger.length}');
+      for (var entry in _ledger) {
+        debugPrint('Entry: type=${entry.type}, amount=${entry.amount}, desc=${entry.description}');
+      }
+    } catch (e, stack) {
       debugPrint('Error loading customer data: $e');
+      debugPrint('Stack trace: $stack');
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -132,8 +153,11 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     onPressed: isProcessing
                         ? null
                         : () async {
+                            debugPrint('=== Record Payment Button Pressed ===');
                             final amount = double.tryParse(amountController.text.trim()) ?? 0;
+                            debugPrint('Amount entered: $amount');
                             if (amount <= 0) {
+                              debugPrint('Invalid amount, showing error');
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                   content: Text('Enter a valid amount'),
@@ -143,9 +167,13 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                               return;
                             }
 
+                            debugPrint('Starting payment recording...');
                             setModalState(() => isProcessing = true);
 
                             try {
+                              debugPrint('Calling CreditProvider.recordPayment...');
+                              debugPrint('Customer ID: ${widget.customer.id}');
+                              debugPrint('Amount: $amount');
                               await Provider.of<CreditProvider>(context, listen: false)
                                   .recordPayment(
                                 customerId: widget.customer.id,
@@ -154,10 +182,28 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                                     ? null
                                     : noteController.text.trim(),
                               );
+                              debugPrint('Payment recorded successfully!');
 
                               if (!mounted) return;
                               Navigator.pop(ctx);
+                              
+                              // Refresh sales data so home view updates
+                              debugPrint('Refreshing SalesProvider...');
+                              if (mounted) {
+                                Provider.of<SalesProvider>(context, listen: false).loadData();
+                              }
+                              
+                              debugPrint('Reloading customer data...');
                               await _loadData();
+                              debugPrint('Customer data reloaded!');
+                              
+                              // Check if balance is now 0, pop back to ledger
+                              if (_currentCustomer != null && _currentCustomer!.balanceDue <= 0) {
+                                debugPrint('Balance is 0, going back to ledger');
+                                if (mounted) {
+                                  Navigator.of(context).pop(true); // Return true to indicate refresh needed
+                                }
+                              }
 
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
@@ -239,11 +285,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.send, color: Colors.green),
-            onPressed: () => _sendReminder(customer),
-            tooltip: 'Send Reminder',
-          ),
           IconButton(
             icon: const Icon(Icons.refresh, color: AppTheme.primaryColor),
             onPressed: _loadData,
@@ -435,32 +476,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
             fontSize: 16,
           ),
         ),
-      ),
-    );
-  }
-
-  Future<void> _sendReminder(Customer customer) async {
-    if (!customer.hasDue) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No pending dues for this customer')),
-      );
-      return;
-    }
-
-    final sent = await WhatsAppService.sendPaymentReminder(
-      phone: customer.phone,
-      customerName: customer.name,
-      amount: customer.balanceDue,
-    );
-
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          sent ? 'WhatsApp opened' : 'Could not open WhatsApp',
-        ),
-        backgroundColor: sent ? Colors.green : AppTheme.errorColor,
       ),
     );
   }

@@ -56,24 +56,34 @@ class SalesProvider extends ChangeNotifier {
 
       for (var sale in salesData) {
         double amount = (sale['amount'] as num).toDouble();
-        total += amount;
+        bool isCredit = sale['is_credit'] == true;
+        
+        // Only count non-credit sales in totals (credit = receivables, not actual sales)
+        if (!isCredit) {
+          total += amount;
+        }
 
         DateTime date = _asDateTime(sale['created_at']);
         if (date.year == now.year &&
             date.month == now.month &&
             date.day == now.day) {
-          today += amount;
+          // Only count non-credit sales in today's total
+          if (!isCredit) {
+            today += amount;
+          }
           todayCount++;
         }
 
-        // Platform Calculation (safely handle missing field for old records)
-        String platform = (sale['platform'] ?? 'Offline').toString();
-        if (platform == 'WhatsApp') {
-          whatsapp += amount;
-        } else if (platform == 'Online') {
-          online += amount;
-        } else {
-          offline += amount;
+        // Platform Calculation (only for non-credit sales)
+        if (!isCredit) {
+          String platform = (sale['platform'] ?? 'Offline').toString();
+          if (platform == 'WhatsApp') {
+            whatsapp += amount;
+          } else if (platform == 'Online') {
+            online += amount;
+          } else {
+            offline += amount;
+          }
         }
       }
 

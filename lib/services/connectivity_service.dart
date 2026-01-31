@@ -12,6 +12,10 @@ class ConnectivityService {
 
   final Connectivity _connectivity = Connectivity();
   StreamSubscription<List<ConnectivityResult>>? _subscription;
+  Timer? _reconnectTimer;
+  int _reconnectAttempts = 0;
+  static const int _maxReconnectAttempts = 10;
+  static const Duration _reconnectInterval = Duration(seconds: 5);
 
   bool _isOnline = true;
   bool get isOnline => _isOnline;
@@ -43,10 +47,55 @@ class ConnectivityService {
 
     debugPrint('Connectivity changed: ${_isOnline ? "Online" : "Offline"}');
 
-    // If we just came back online, trigger sync
+    // If we just came back online, trigger sync and stop reconnect attempts
     if (_isOnline && !wasOnline) {
+      _stopReconnectTimer();
+      _reconnectAttempts = 0;
       _syncPendingData();
     }
+    
+    // If we just went offline, start reconnect attempts
+    if (!_isOnline && wasOnline) {
+      _startReconnectTimer();
+    }
+  }
+
+  /// Start periodic reconnection attempts
+  void _startReconnectTimer() {
+    _stopReconnectTimer();
+    _reconnectAttempts = 0;
+    
+    debugPrint('Starting auto-reconnect timer...');
+    
+    _reconnectTimer = Timer.periodic(_reconnectInterval, (timer) async {
+      if (_isOnline) {
+        _stopReconnectTimer();
+        return;
+      }
+      
+      _reconnectAttempts++;
+      debugPrint('Reconnect attempt $_reconnectAttempts/$_maxReconnectAttempts');
+      
+      // Check connectivity again
+      try {
+        final results = await _connectivity.checkConnectivity();
+        _updateConnectivity(results);
+      } catch (e) {
+        debugPrint('Reconnect check failed: $e');
+      }
+      
+      // Stop after max attempts (will restart on next disconnect)
+      if (_reconnectAttempts >= _maxReconnectAttempts) {
+        debugPrint('Max reconnect attempts reached, stopping timer');
+        _stopReconnectTimer();
+      }
+    });
+  }
+
+  /// Stop reconnection timer
+  void _stopReconnectTimer() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
   }
 
   /// Attempt to sync pending data when coming back online.
@@ -81,8 +130,23 @@ class ConnectivityService {
     return pendingSales + pendingPayments;
   }
 
+  /// Force a reconnection check
+  Future<void> forceReconnect() async {
+    debugPrint('Forcing reconnection check...');
+    try {
+      final results = await _connectivity.checkConnectivity();
+      _updateConnectivity(results);
+      if (_isOnline) {
+        await _syncPendingData();
+      }
+    } catch (e) {
+      debugPrint('Force reconnect failed: $e');
+    }
+  }
+
   /// Dispose of resources.
   void dispose() {
+    _stopReconnectTimer();
     _subscription?.cancel();
     _onlineController.close();
   }

@@ -1,7 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shop_app/models/product_model.dart';
 import 'package:shop_app/providers/inventory_provider.dart';
+import 'package:shop_app/providers/credit_provider.dart';
+import 'package:shop_app/providers/sales_provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shop_app/services/firestore_service.dart';
 import 'package:shop_app/services/offline_sync_service.dart';
@@ -199,6 +202,9 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
 
       final amount = double.tryParse(_amountController.text) ?? 0;
 
+      debugPrint('Submitting sale: amount=$amount, paymentMode=$_paymentMode, platform=$_platform');
+      debugPrint('Cart items: $_cart');
+
       final isCredit = _paymentMode == 'Pay Later';
       String? customerId;
       String? customerName;
@@ -221,8 +227,10 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
           name: customerName,
           phone: customerPhone,
         );
+        debugPrint('Credit sale - customerId=$customerId');
       }
 
+      debugPrint('Calling addSaleAndUpdateStock...');
       await _firestore.addSaleAndUpdateStock(
         amount: amount,
         description: description,
@@ -234,10 +242,23 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
         customerName: customerName,
         customerPhone: customerPhone,
       );
+      debugPrint('Sale recorded successfully!');
 
       await provider.fetchProducts();
+      
+      // Refresh sales and credit providers immediately
+      if (mounted) {
+        Provider.of<SalesProvider>(context, listen: false).loadData();
+        if (isCredit) {
+          Provider.of<CreditProvider>(context, listen: false).loadCustomers();
+        }
+      }
 
       if (!mounted) return;
+      
+      // Close the modal bottom sheet first if open
+      Navigator.of(context).popUntil((route) => route.isFirst || route.settings.name == '/add-sale');
+      
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Sale added successfully'),
@@ -245,7 +266,9 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
           behavior: SnackBarBehavior.floating,
         ),
       );
-      Navigator.pop(context, true);
+      
+      // Navigate back to dashboard with result
+      Navigator.of(context).pop(true);
     } catch (e) {
       // Offline fallback: queue the sale to sync later.
       if (e is FirebaseException &&
@@ -267,13 +290,19 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
         });
 
         if (!mounted) return;
+        
+        // Close the modal bottom sheet first if open
+        Navigator.of(context).popUntil((route) => route.isFirst || route.settings.name == '/add-sale');
+        
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Saved offline. Will sync when online.'),
             behavior: SnackBarBehavior.floating,
           ),
         );
-        Navigator.pop(context, true);
+        
+        // Navigate back to dashboard with result
+        Navigator.of(context).pop(true);
         return;
       }
 
@@ -412,11 +441,25 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
     final cartList = Consumer<InventoryProvider>(
       builder: (context, provider, _) {
         if (_cart.isEmpty) {
-          return const Center(child: Text('Cart is empty'));
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 40),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.shopping_cart_outlined, size: 48, color: Colors.grey),
+                  SizedBox(height: 12),
+                  Text('Cart is empty', style: TextStyle(color: Colors.grey)),
+                  SizedBox(height: 4),
+                  Text('Tap products to add them', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                ],
+              ),
+            ),
+          );
         }
         return ListView.separated(
-          shrinkWrap: !scrollable,
-          physics: scrollable ? null : const NeverScrollableScrollPhysics(),
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
           itemCount: _cart.length,
           separatorBuilder: (context, index) => const Divider(height: 1),
           itemBuilder: (context, index) {
@@ -526,15 +569,11 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
       ],
     );
 
-    return Column(
+    // Form fields that appear below the cart
+    final formContent = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Text('Cart', style: AppTheme.headingStyle.copyWith(fontSize: 20)),
-        const SizedBox(height: 8),
-        const Divider(),
-        if (scrollable) Expanded(child: cartList) else cartList,
-        const Divider(),
-        totalsRow,
         const SizedBox(height: 16),
         Text('Payment mode', style: AppTheme.captionStyle),
         const SizedBox(height: 8),
@@ -579,11 +618,48 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
         ),
         const SizedBox(height: 16),
         CustomButton(
-          text: 'Complete Sale',
+          text: _paymentMode == 'Pay Later' ? 'Record Udhaar' : 'Complete Sale',
           onPressed: _isLoading ? null : _submitSale,
           isLoading: _isLoading,
-          icon: Icons.check_circle_outline,
+          icon: _paymentMode == 'Pay Later' ? Icons.account_balance_wallet : Icons.check_circle_outline,
         ),
+      ],
+    );
+
+    if (scrollable) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('Cart', style: AppTheme.headingStyle.copyWith(fontSize: 20)),
+          const SizedBox(height: 8),
+          const Divider(),
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  cartList,
+                  const Divider(),
+                  totalsRow,
+                  formContent,
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Cart', style: AppTheme.headingStyle.copyWith(fontSize: 20)),
+        const SizedBox(height: 8),
+        const Divider(),
+        cartList,
+        const Divider(),
+        totalsRow,
+        formContent,
       ],
     );
   }
@@ -597,31 +673,209 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (context) {
+      builder: (sheetContext) {
         return StatefulBuilder(
-          builder: (context, modalSetState) {
+          builder: (sheetContext, modalSetState) {
             void refresh() => modalSetState(() {});
 
             return SafeArea(
-              child: Padding(
-                padding: EdgeInsets.only(
-                  left: 16,
-                  right: 16,
-                  top: 8,
-                  bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
-                ),
-                child: SizedBox(
-                  height: MediaQuery.of(context).size.height * 0.80,
-                  child: _buildCartContent(
-                    scrollable: true,
-                    refreshSheet: refresh,
-                  ),
-                ),
+              child: DraggableScrollableSheet(
+                initialChildSize: 0.85,
+                minChildSize: 0.5,
+                maxChildSize: 0.95,
+                expand: false,
+                builder: (context, scrollController) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: _buildScrollableCartContent(
+                      scrollController: scrollController,
+                      refreshSheet: refresh,
+                    ),
+                  );
+                },
               ),
             );
           },
         );
       },
+    );
+  }
+
+  Widget _buildScrollableCartContent({
+    required ScrollController scrollController,
+    VoidCallback? refreshSheet,
+  }) {
+    final paymentModes = const ['Cash', 'UPI', 'Card', 'Pay Later'];
+    final platforms = const ['Offline', 'Online'];
+
+    return ListView(
+      controller: scrollController,
+      children: [
+        Text('Cart', style: AppTheme.headingStyle.copyWith(fontSize: 20)),
+        const SizedBox(height: 8),
+        const Divider(),
+        // Cart items
+        Consumer<InventoryProvider>(
+          builder: (context, provider, _) {
+            if (_cart.isEmpty) {
+              return const Padding(
+                padding: EdgeInsets.symmetric(vertical: 40),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.shopping_cart_outlined, size: 48, color: Colors.grey),
+                      SizedBox(height: 12),
+                      Text('Cart is empty', style: TextStyle(color: Colors.grey)),
+                      SizedBox(height: 4),
+                      Text('Tap products to add them', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    ],
+                  ),
+                ),
+              );
+            }
+            return Column(
+              children: _cart.entries.map((entry) {
+                final productId = entry.key;
+                final quantity = entry.value;
+                final product = _findProduct(provider, productId);
+                if (product == null) return const SizedBox.shrink();
+
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    product.name,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                  subtitle: Text('₹${product.price} x $quantity'),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.remove_circle, size: 20, color: Colors.grey),
+                        onPressed: _isLoading
+                            ? null
+                            : () {
+                                _removeItem(product);
+                                refreshSheet?.call();
+                              },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.add_circle, size: 20, color: AppTheme.primaryColor),
+                        onPressed: _isLoading
+                            ? null
+                            : () {
+                                _addItem(product);
+                                refreshSheet?.call();
+                              },
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            );
+          },
+        ),
+        const Divider(),
+        // Totals row
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Total:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            Text(
+              '₹${_amountController.text}',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: AppTheme.primaryColor),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        // Payment mode
+        Text('Payment mode', style: AppTheme.captionStyle),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final mode in paymentModes)
+              ChoiceChip(
+                label: Text(mode),
+                selected: _paymentMode == mode,
+                onSelected: _isLoading
+                    ? null
+                    : (_) {
+                        setState(() => _paymentMode = mode);
+                        refreshSheet?.call();
+                      },
+              ),
+          ],
+        ),
+        // Customer fields for Pay Later
+        if (_paymentMode == 'Pay Later') ...[
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Customer (Pay Later)', style: AppTheme.captionStyle),
+              TextButton.icon(
+                onPressed: _isLoading ? null : _pickCustomer,
+                icon: const Icon(Icons.people_outline, size: 18),
+                label: const Text('Select'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          CustomTextField(
+            controller: _customerNameController,
+            label: 'Customer name',
+            prefixIcon: Icons.person_outline,
+          ),
+          const SizedBox(height: 12),
+          CustomTextField(
+            controller: _customerPhoneController,
+            label: 'Customer phone (E.164)',
+            prefixIcon: Icons.phone_outlined,
+            keyboardType: TextInputType.phone,
+          ),
+        ],
+        const SizedBox(height: 12),
+        // Platform
+        Text('Platform', style: AppTheme.captionStyle),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final p in platforms)
+              ChoiceChip(
+                label: Text(p),
+                selected: _platform == p,
+                onSelected: _isLoading
+                    ? null
+                    : (_) {
+                        setState(() => _platform = p);
+                        refreshSheet?.call();
+                      },
+              ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        // Notes
+        CustomTextField(
+          controller: _descriptionController,
+          label: 'Customer / Notes',
+          prefixIcon: Icons.notes_outlined,
+          maxLines: 2,
+        ),
+        const SizedBox(height: 16),
+        // Submit button
+        CustomButton(
+          text: _paymentMode == 'Pay Later' ? 'Record Udhaar' : 'Complete Sale',
+          onPressed: _isLoading ? null : _submitSale,
+          isLoading: _isLoading,
+          icon: _paymentMode == 'Pay Later' ? Icons.account_balance_wallet : Icons.check_circle_outline,
+        ),
+        const SizedBox(height: 16),
+      ],
     );
   }
 
@@ -725,21 +979,7 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
                       ),
                     ),
                     ElevatedButton.icon(
-                      onPressed: _isLoading
-                          ? null
-                          : () {
-                              if (_cart.isEmpty) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      'Cart is empty. Add items first.',
-                                    ),
-                                  ),
-                                );
-                                return;
-                              }
-                              _openCartSheet();
-                            },
+                      onPressed: _isLoading ? null : _openCartSheet,
                       icon: const Icon(Icons.shopping_cart_outlined),
                       label: Text('Cart (${_cart.length})'),
                       style: ElevatedButton.styleFrom(
