@@ -53,13 +53,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     setState(() => _isLoading = true);
     try {
+      final email = _emailController.text.trim();
+
+      await FirestoreService().assertUniqueContact(
+        email: email.isEmpty ? null : email,
+      );
+
       await FirestoreService().upsertUserProfile({
         'name': _nameController.text.trim(),
         'shop_name': _shopNameController.text.trim(),
         'gender': _gender,
-        'email': _emailController.text.trim().isEmpty
-            ? null
-            : _emailController.text.trim(),
+        'email': email.isEmpty ? null : email,
         'address': _addressController.text.trim().isEmpty
             ? null
             : _addressController.text.trim(),

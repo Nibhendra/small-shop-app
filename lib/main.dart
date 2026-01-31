@@ -11,10 +11,13 @@ import 'package:shop_app/screens/home_screen.dart';
 import 'package:shop_app/screens/add_sale_screen.dart';
 import 'package:shop_app/screens/profile_onboarding_screen.dart';
 import 'package:shop_app/screens/profile_screen.dart';
+import 'package:shop_app/screens/splash_screen.dart';
 import 'package:shop_app/services/firestore_service.dart';
+import 'package:shop_app/services/local_store.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await LocalStore.init();
   try {
     await Firebase.initializeApp();
   } catch (e) {
@@ -95,7 +98,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => InventoryProvider()),
       ],
       child: MaterialApp(
-        title: 'Shop App',
+        title: 'Vyapaar',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
@@ -108,8 +111,9 @@ class MyApp extends StatelessWidget {
             ),
           ),
         ),
-        initialRoute: '/',
+        initialRoute: '/splash',
         routes: {
+          '/splash': (context) => const SplashScreen(),
           '/': (context) => const AuthGate(),
           '/login': (context) => const LoginScreen(),
           '/home': (context) => const HomeScreen(),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shop_app/models/product_model.dart';
 import 'package:shop_app/services/firestore_service.dart';
+import 'package:shop_app/services/local_store.dart';
 
 class InventoryProvider with ChangeNotifier {
   List<Product> _products = [];
@@ -31,8 +32,24 @@ class InventoryProvider with ChangeNotifier {
             ),
           )
           .toList();
+
+      // Cache for offline usage.
+      await LocalStore.setCachedProducts(productMaps);
     } catch (e) {
       _error = e.toString();
+
+      // Fallback to cached products when offline.
+      final cached = LocalStore.getCachedProducts();
+      if (cached.isNotEmpty) {
+        _products = cached
+            .map(
+              (map) => Product.fromMap(
+                map,
+                id: map['id'] as String,
+              ),
+            )
+            .toList();
+      }
     } finally {
       _isLoading = false;
       notifyListeners();

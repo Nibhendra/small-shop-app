@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shop_app/models/product_model.dart';
 import 'package:shop_app/providers/inventory_provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shop_app/services/firestore_service.dart';
+import 'package:shop_app/services/offline_sync_service.dart';
 import 'package:shop_app/utils/app_theme.dart';
 import 'package:shop_app/widgets/custom_button.dart';
 import 'package:shop_app/widgets/custom_textfield.dart';
@@ -17,6 +19,10 @@ class AddSaleScreen extends StatefulWidget {
 class _AddSaleScreenState extends State<AddSaleScreen> {
   final _amountController = TextEditingController(text: '0.00');
   final _descriptionController = TextEditingController();
+
+  final _customerNameController = TextEditingController();
+  final _customerPhoneController = TextEditingController();
+  String? _customerId;
 
   String _paymentMode = 'Cash';
   String _platform = 'Offline';
@@ -40,7 +46,71 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
   void dispose() {
     _amountController.dispose();
     _descriptionController.dispose();
+    _customerNameController.dispose();
+    _customerPhoneController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickCustomer() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: SizedBox(
+              height: MediaQuery.of(context).size.height * 0.70,
+              child: StreamBuilder<List<Map<String, dynamic>>>(
+                stream: _firestore.watchCustomers(),
+                builder: (context, snap) {
+                  final customers = snap.data ?? const [];
+                  if (snap.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (customers.isEmpty) {
+                    return const Center(child: Text('No customers yet'));
+                  }
+
+                  return ListView.separated(
+                    itemCount: customers.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final c = customers[index];
+                      final name = (c['name'] ?? '').toString();
+                      final phone = (c['phone'] ?? '').toString();
+                      final due = (c['balance_due'] as num?)?.toDouble() ?? 0;
+
+                      return ListTile(
+                        title: Text(name.isEmpty ? 'Customer' : name),
+                        subtitle: Text(phone),
+                        trailing: due > 0
+                            ? Text(
+                                '₹${due.toStringAsFixed(0)} due',
+                                style: const TextStyle(
+                                  color: AppTheme.errorColor,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              )
+                            : null,
+                        onTap: () {
+                          _customerId = (c['id'] ?? '').toString();
+                          _customerNameController.text = name;
+                          _customerPhoneController.text = phone;
+                          Navigator.pop(context);
+                          if (mounted) setState(() {});
+                        },
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Product? _findProduct(InventoryProvider provider, String productId) {
@@ -66,17 +136,17 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
 
   void _addItem(Product product) {
     if (product.stock <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Out of stock')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Out of stock')));
       return;
     }
 
     final currentQty = _cart[product.id] ?? 0;
     if (currentQty >= product.stock) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Maximum stock reached')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Maximum stock reached')));
       return;
     }
 
@@ -127,12 +197,42 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
         description = parts.isEmpty ? 'Sale' : 'Sale: ${parts.join(', ')}';
       }
 
+      final amount = double.tryParse(_amountController.text) ?? 0;
+
+      final isCredit = _paymentMode == 'Pay Later';
+      String? customerId;
+      String? customerName;
+      String? customerPhone;
+
+      if (isCredit) {
+        customerName = _customerNameController.text.trim();
+        customerPhone = _customerPhoneController.text.trim();
+        if (customerName.length < 2) {
+          throw StateError('Enter customer name for Pay Later');
+        }
+        if (customerPhone.isEmpty || !customerPhone.startsWith('+')) {
+          throw StateError(
+            'Enter customer phone in format +<countrycode><number>',
+          );
+        }
+
+        customerId = _customerId;
+        customerId ??= await _firestore.upsertCustomer(
+          name: customerName,
+          phone: customerPhone,
+        );
+      }
+
       await _firestore.addSaleAndUpdateStock(
-        amount: double.tryParse(_amountController.text) ?? 0,
+        amount: amount,
         description: description,
         paymentMode: _paymentMode,
         platform: _platform,
         cart: _cart,
+        isCredit: isCredit,
+        customerId: customerId,
+        customerName: customerName,
+        customerPhone: customerPhone,
       );
 
       await provider.fetchProducts();
@@ -147,6 +247,36 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
       );
       Navigator.pop(context, true);
     } catch (e) {
+      // Offline fallback: queue the sale to sync later.
+      if (e is FirebaseException &&
+          (e.code == 'unavailable' || e.code == 'network-request-failed')) {
+        final offline = OfflineSyncService();
+        await offline.enqueueSale({
+          'amount': double.tryParse(_amountController.text) ?? 0,
+          'description': _descriptionController.text.trim().isEmpty
+              ? 'Sale'
+              : _descriptionController.text.trim(),
+          'payment_mode': _paymentMode,
+          'platform': _platform,
+          'cart': _cart,
+          'is_credit': _paymentMode == 'Pay Later',
+          'customer_id': _customerId,
+          'customer_name': _customerNameController.text.trim(),
+          'customer_phone': _customerPhoneController.text.trim(),
+          'created_at_ms': DateTime.now().millisecondsSinceEpoch,
+        });
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Saved offline. Will sync when online.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        Navigator.pop(context, true);
+        return;
+      }
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -192,8 +322,9 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color:
-                        qtyInCart > 0 ? AppTheme.primaryColor : Colors.transparent,
+                    color: qtyInCart > 0
+                        ? AppTheme.primaryColor
+                        : Colors.transparent,
                     width: 2,
                   ),
                   boxShadow: [
@@ -210,8 +341,9 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
                     children: [
                       CircleAvatar(
                         radius: 20,
-                        backgroundColor:
-                            AppTheme.primaryColor.withValues(alpha: 0.10),
+                        backgroundColor: AppTheme.primaryColor.withValues(
+                          alpha: 0.10,
+                        ),
                         child: Text(
                           product.name.isNotEmpty
                               ? product.name[0].toUpperCase()
@@ -270,8 +402,11 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
     );
   }
 
-  Widget _buildCartContent({required bool scrollable}) {
-    final paymentModes = const ['Cash', 'UPI', 'Card'];
+  Widget _buildCartContent({
+    required bool scrollable,
+    VoidCallback? refreshSheet,
+  }) {
+    final paymentModes = const ['Cash', 'UPI', 'Card', 'Pay Later'];
     final platforms = const ['Offline', 'Online'];
 
     final cartList = Consumer<InventoryProvider>(
@@ -294,7 +429,10 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
               contentPadding: EdgeInsets.zero,
               title: Text(
                 product.name,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
               ),
               subtitle: Text('₹${product.price} x $quantity'),
               trailing: Row(
@@ -306,7 +444,12 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
                       size: 20,
                       color: Colors.grey,
                     ),
-                    onPressed: _isLoading ? null : () => _removeItem(product),
+                    onPressed: _isLoading
+                        ? null
+                        : () {
+                            _removeItem(product);
+                            refreshSheet?.call();
+                          },
                   ),
                   IconButton(
                     icon: const Icon(
@@ -314,7 +457,12 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
                       size: 20,
                       color: AppTheme.primaryColor,
                     ),
-                    onPressed: _isLoading ? null : () => _addItem(product),
+                    onPressed: _isLoading
+                        ? null
+                        : () {
+                            _addItem(product);
+                            refreshSheet?.call();
+                          },
                   ),
                 ],
               ),
@@ -354,6 +502,7 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
                 ? null
                 : (_) {
                     setState(() => _paymentMode = mode);
+                    refreshSheet?.call();
                   },
           ),
       ],
@@ -371,6 +520,7 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
                 ? null
                 : (_) {
                     setState(() => _platform = p);
+                    refreshSheet?.call();
                   },
           ),
       ],
@@ -382,16 +532,40 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
         Text('Cart', style: AppTheme.headingStyle.copyWith(fontSize: 20)),
         const SizedBox(height: 8),
         const Divider(),
-        if (scrollable)
-          Expanded(child: cartList)
-        else
-          cartList,
+        if (scrollable) Expanded(child: cartList) else cartList,
         const Divider(),
         totalsRow,
         const SizedBox(height: 16),
         Text('Payment mode', style: AppTheme.captionStyle),
         const SizedBox(height: 8),
         paymentChips,
+        if (_paymentMode == 'Pay Later') ...[
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Customer (Pay Later)', style: AppTheme.captionStyle),
+              TextButton.icon(
+                onPressed: _isLoading ? null : _pickCustomer,
+                icon: const Icon(Icons.people_outline, size: 18),
+                label: const Text('Select'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          CustomTextField(
+            controller: _customerNameController,
+            label: 'Customer name',
+            prefixIcon: Icons.person_outline,
+          ),
+          const SizedBox(height: 12),
+          CustomTextField(
+            controller: _customerPhoneController,
+            label: 'Customer phone (E.164)',
+            prefixIcon: Icons.phone_outlined,
+            keyboardType: TextInputType.phone,
+          ),
+        ],
         const SizedBox(height: 12),
         Text('Platform', style: AppTheme.captionStyle),
         const SizedBox(height: 8),
@@ -424,19 +598,28 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: EdgeInsets.only(
-              left: 16,
-              right: 16,
-              top: 8,
-              bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
-            ),
-            child: SizedBox(
-              height: MediaQuery.of(context).size.height * 0.80,
-              child: _buildCartContent(scrollable: true),
-            ),
-          ),
+        return StatefulBuilder(
+          builder: (context, modalSetState) {
+            void refresh() => modalSetState(() {});
+
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: 16,
+                  right: 16,
+                  top: 8,
+                  bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
+                ),
+                child: SizedBox(
+                  height: MediaQuery.of(context).size.height * 0.80,
+                  child: _buildCartContent(
+                    scrollable: true,
+                    refreshSheet: refresh,
+                  ),
+                ),
+              ),
+            );
+          },
         );
       },
     );
@@ -466,10 +649,17 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
                     children: [
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Text('Select Items', style: AppTheme.subHeadingStyle),
+                        child: Text(
+                          'Select Items',
+                          style: AppTheme.subHeadingStyle,
+                        ),
                       ),
                       const SizedBox(height: 10),
-                      Expanded(child: _buildProductGrid(crossAxisCount: crossAxisCount)),
+                      Expanded(
+                        child: _buildProductGrid(
+                          crossAxisCount: crossAxisCount,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -496,9 +686,14 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
 
           return Column(
             children: [
-              Expanded(child: _buildProductGrid(crossAxisCount: crossAxisCount)),
+              Expanded(
+                child: _buildProductGrid(crossAxisCount: crossAxisCount),
+              ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   boxShadow: [
@@ -516,10 +711,7 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(
-                            'Total',
-                            style: AppTheme.captionStyle,
-                          ),
+                          Text('Total', style: AppTheme.captionStyle),
                           const SizedBox(height: 2),
                           Text(
                             '₹${_amountController.text}',
@@ -533,7 +725,21 @@ class _AddSaleScreenState extends State<AddSaleScreen> {
                       ),
                     ),
                     ElevatedButton.icon(
-                      onPressed: _cart.isEmpty || _isLoading ? null : _openCartSheet,
+                      onPressed: _isLoading
+                          ? null
+                          : () {
+                              if (_cart.isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Cart is empty. Add items first.',
+                                    ),
+                                  ),
+                                );
+                                return;
+                              }
+                              _openCartSheet();
+                            },
                       icon: const Icon(Icons.shopping_cart_outlined),
                       label: Text('Cart (${_cart.length})'),
                       style: ElevatedButton.styleFrom(

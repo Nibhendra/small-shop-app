@@ -11,7 +11,8 @@ class ProfileOnboardingScreen extends StatefulWidget {
   const ProfileOnboardingScreen({super.key});
 
   @override
-  State<ProfileOnboardingScreen> createState() => _ProfileOnboardingScreenState();
+  State<ProfileOnboardingScreen> createState() =>
+      _ProfileOnboardingScreenState();
 }
 
 class _ProfileOnboardingScreenState extends State<ProfileOnboardingScreen> {
@@ -26,6 +27,13 @@ class _ProfileOnboardingScreenState extends State<ProfileOnboardingScreen> {
   String? _gender;
   bool _isLoading = false;
   bool _loaded = false;
+
+  static const Set<String> _allowedGenders = {
+    'male',
+    'female',
+    'other',
+    'prefer_not_to_say',
+  };
 
   @override
   void dispose() {
@@ -46,8 +54,8 @@ class _ProfileOnboardingScreenState extends State<ProfileOnboardingScreen> {
 
     _nameController.text =
         (profile?['name']?.toString().trim().isNotEmpty == true)
-            ? profile!['name'].toString()
-            : (user?.displayName ?? '');
+        ? profile!['name'].toString()
+        : (user?.displayName ?? '');
 
     _shopNameController.text = profile?['shop_name']?.toString() ?? '';
 
@@ -57,7 +65,10 @@ class _ProfileOnboardingScreenState extends State<ProfileOnboardingScreen> {
     final email = profile?['email']?.toString() ?? user?.email ?? '';
     _emailController.text = email;
 
-    _gender = profile?['gender']?.toString();
+    final rawGender = profile?['gender']?.toString().trim().toLowerCase();
+    _gender = (rawGender != null && _allowedGenders.contains(rawGender))
+        ? rawGender
+        : null;
     _addressController.text = profile?['address']?.toString() ?? '';
 
     if (mounted) setState(() {});
@@ -69,13 +80,20 @@ class _ProfileOnboardingScreenState extends State<ProfileOnboardingScreen> {
 
     setState(() => _isLoading = true);
     try {
+      final email = _emailController.text.trim();
+      final phone = _phoneController.text.trim();
+
+      // Uniqueness checks (best-effort; Firestore doesn't enforce uniqueness).
+      await FirestoreService().assertUniqueContact(
+        email: email.isEmpty ? null : email,
+        phone: phone,
+      );
+
       await FirestoreService().upsertUserProfile({
         'name': _nameController.text.trim(),
         'shop_name': _shopNameController.text.trim(),
-        'phone': _phoneController.text.trim(),
-        'email': _emailController.text.trim().isEmpty
-            ? null
-            : _emailController.text.trim(),
+        'phone': phone,
+        'email': email.isEmpty ? null : email,
         'gender': _gender,
         'address': _addressController.text.trim().isEmpty
             ? null
@@ -96,7 +114,8 @@ class _ProfileOnboardingScreenState extends State<ProfileOnboardingScreen> {
       }
 
       if (!mounted) return;
-      Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
+      // Route through AuthGate so relogin/profile-complete logic stays consistent.
+      Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -152,12 +171,21 @@ class _ProfileOnboardingScreenState extends State<ProfileOnboardingScreen> {
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
-                        key: ValueKey(_gender ?? ''),
-                        initialValue: _gender,
+                        initialValue:
+                            (_gender != null &&
+                                    _allowedGenders.contains(_gender))
+                                ? _gender
+                                : null,
                         items: const [
                           DropdownMenuItem(value: 'male', child: Text('Male')),
-                          DropdownMenuItem(value: 'female', child: Text('Female')),
-                          DropdownMenuItem(value: 'other', child: Text('Other')),
+                          DropdownMenuItem(
+                            value: 'female',
+                            child: Text('Female'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'other',
+                            child: Text('Other'),
+                          ),
                           DropdownMenuItem(
                             value: 'prefer_not_to_say',
                             child: Text('Prefer not to say'),
@@ -195,8 +223,10 @@ class _ProfileOnboardingScreenState extends State<ProfileOnboardingScreen> {
                         prefixIcon: Icons.phone_outlined,
                         keyboardType: TextInputType.phone,
                         validator: (v) {
-                          if (v == null || v.trim().isEmpty) {
-                            return 'Enter phone number';
+                          final value = v?.trim() ?? '';
+                          if (value.isEmpty) return 'Enter phone number';
+                          if (!value.startsWith('+')) {
+                            return 'Use format +<countrycode><number>';
                           }
                           return null;
                         },
@@ -207,6 +237,15 @@ class _ProfileOnboardingScreenState extends State<ProfileOnboardingScreen> {
                         label: 'Email (optional)',
                         prefixIcon: Icons.email_outlined,
                         keyboardType: TextInputType.emailAddress,
+                        validator: (v) {
+                          final value = v?.trim() ?? '';
+                          if (value.isEmpty) return null;
+                          final ok = RegExp(
+                            r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
+                          ).hasMatch(value);
+                          if (!ok) return 'Enter a valid email';
+                          return null;
+                        },
                       ),
                       const SizedBox(height: 12),
                       CustomTextField(

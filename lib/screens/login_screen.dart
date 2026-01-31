@@ -180,108 +180,140 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.backgroundColor,
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Logo or Header
-              Center(
-                child: Container(
-                  height: 100,
-                  width: 100,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppTheme.primaryColor.withValues(alpha: 0.2),
-                        blurRadius: 12,
-                        offset: const Offset(0, 6),
-                      ),
-                    ],
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(20),
-                    child: Image.asset(
-                      'assets/images/logo.png',
-                      fit: BoxFit.cover,
-                    ),
-                  ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(24, 22, 24, 26),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF180629), Color(0xFF6C63FF)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.vertical(
+                  bottom: Radius.circular(28),
                 ),
               ),
-              const SizedBox(height: 24),
-              Text(
-                "Welcome",
-                textAlign: TextAlign.center,
-                style: AppTheme.headingStyle,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                "Sign in to manage your shop",
-                textAlign: TextAlign.center,
-                style: AppTheme.captionStyle.copyWith(fontSize: 16),
-              ),
-              const SizedBox(height: 48),
-
-              CustomButton(
-                text: "Continue with Google",
-                isLoading: _isLoading,
-                onPressed: _isLoading ? null : _signInWithGoogle,
-                icon: Icons.login,
-              ),
-
-              const SizedBox(height: 20),
-
-              Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Expanded(
-                    child: Divider(color: Colors.grey.withValues(alpha: 0.4)),
+                  Container(
+                    height: 88,
+                    width: 88,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(22),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.25),
+                          blurRadius: 20,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(22),
+                      child: Image.asset(
+                        'assets/images/logo.png',
+                        fit: BoxFit.cover,
+                      ),
+                    ),
                   ),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('OR'),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Vyapaar',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.2,
+                    ),
                   ),
-                  Expanded(
-                    child: Divider(color: Colors.grey.withValues(alpha: 0.4)),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Sign in to manage your shop',
+                    textAlign: TextAlign.center,
+                    style: AppTheme.captionStyle.copyWith(
+                      color: Colors.white.withValues(alpha: 0.8),
+                      fontSize: 14,
+                    ),
                   ),
                 ],
               ),
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const SizedBox(height: 8),
+                    CustomButton(
+                      text: "Continue with Google",
+                      isLoading: _isLoading,
+                      onPressed: _isLoading ? null : _signInWithGoogle,
+                      icon: Icons.login,
+                    ),
 
-              const SizedBox(height: 20),
+                    const SizedBox(height: 20),
 
-              CustomTextField(
-                controller: _phoneController,
-                label: "Phone Number (E.164)",
-                prefixIcon: Icons.phone_outlined,
-                keyboardType: TextInputType.phone,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                "Example: +919876543210 (WhatsApp recommended)",
-                style: AppTheme.captionStyle.copyWith(fontSize: 12),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Divider(
+                            color: Colors.grey.withValues(alpha: 0.4),
+                          ),
+                        ),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 12),
+                          child: Text('OR'),
+                        ),
+                        Expanded(
+                          child: Divider(
+                            color: Colors.grey.withValues(alpha: 0.4),
+                          ),
+                        ),
+                      ],
+                    ),
 
-              CustomButton(
-                text: "Send OTP on WhatsApp (Recommended)",
-                isLoading: _isLoading,
-                onPressed: _isLoading
-                    ? null
-                    : () => _startOtp(channel: 'whatsapp'),
-                icon: Icons.chat_bubble_outline,
+                    const SizedBox(height: 20),
+
+                    CustomTextField(
+                      controller: _phoneController,
+                      label: "Phone Number (E.164)",
+                      prefixIcon: Icons.phone_outlined,
+                      keyboardType: TextInputType.phone,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      "Example: +919876543210",
+                      style: AppTheme.captionStyle.copyWith(fontSize: 12),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 16),
+
+                    CustomButton(
+                      text: "Send OTP on WhatsApp",
+                      isLoading: _isLoading,
+                      onPressed: _isLoading
+                          ? null
+                          : () => _startOtp(channel: 'whatsapp'),
+                      icon: Icons.chat_bubble_outline,
+                    ),
+                    const SizedBox(height: 12),
+                    CustomButton(
+                      text: "Send OTP by SMS",
+                      isLoading: _isLoading,
+                      onPressed: _isLoading ? null : _startFirebaseSmsOtp,
+                      icon: Icons.sms_outlined,
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 12),
-              CustomButton(
-                text: "Send OTP by SMS",
-                isLoading: _isLoading,
-                onPressed: _isLoading ? null : _startFirebaseSmsOtp,
-                icon: Icons.sms_outlined,
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
