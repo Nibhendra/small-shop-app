@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:provider/provider.dart';
 import 'package:shop_app/providers/user_provider.dart';
-import 'package:shop_app/services/mongodb_service.dart';
+import 'package:shop_app/services/firestore_service.dart';
+import 'package:shop_app/screens/backend_otp_verification_screen.dart';
+import 'package:shop_app/screens/otp_verification_screen.dart';
+import 'package:shop_app/services/otp_backend_service.dart';
 import 'package:shop_app/utils/app_theme.dart';
 import 'package:shop_app/widgets/custom_button.dart';
 import 'package:shop_app/widgets/custom_textfield.dart';
@@ -14,64 +19,160 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _nameController = TextEditingController();
-  final _usernameController = TextEditingController();
-  final _passwordController = TextEditingController();
+  final _phoneController = TextEditingController();
   bool _isLoading = false;
-  bool _isLogin = true;
+  final OtpBackendService _otpBackend = OtpBackendService();
 
-  void _submit() async {
-    String name = _nameController.text.trim();
-    String username = _usernameController.text.trim();
-    String password = _passwordController.text.trim();
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    super.dispose();
+  }
 
-    if (username.isEmpty || password.isEmpty || (!_isLogin && name.isEmpty)) {
+  Future<void> _syncUserIntoProvider() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final firestore = FirestoreService();
+    await firestore.ensureUserProfile();
+    final profile = await firestore.getUserProfile();
+
+    if (!mounted) return;
+    Provider.of<UserProvider>(context, listen: false).setFromFirebase(
+      uid: user.uid,
+      displayName: profile?['name']?.toString() ?? user.displayName,
+      email: user.email,
+      phone: user.phoneNumber,
+      shopName: profile?['shop_name']?.toString(),
+    );
+  }
+
+  Future<void> _signInWithGoogle() async {
+    setState(() => _isLoading = true);
+    try {
+      final googleUser = await GoogleSignIn().signIn();
+      if (googleUser == null) {
+        setState(() => _isLoading = false);
+        return;
+      }
+      final googleAuth = await googleUser.authentication;
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      await FirebaseAuth.instance.signInWithCredential(credential);
+      await _syncUserIntoProvider();
+
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Google sign-in failed: $e'),
+            backgroundColor: AppTheme.errorColor,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _startOtp({required String channel}) async {
+    final phone = _phoneController.text.trim();
+    if (phone.isEmpty || !phone.startsWith('+')) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("Please fill all fields"),
+          content: const Text('Enter phone in format +<countrycode><number>'),
           backgroundColor: AppTheme.errorColor,
+          behavior: SnackBarBehavior.floating,
         ),
       );
       return;
     }
 
     setState(() => _isLoading = true);
+    try {
+      await _otpBackend.startOtp(phone: phone, channel: channel);
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        BackendOtpVerificationScreen.route(
+          phoneNumber: phone,
+          channel: channel,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to send OTP: $e'),
+          backgroundColor: AppTheme.errorColor,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
-    String result;
-    if (_isLogin) {
-      result = await MongoDatabase.login(username, password);
-    } else {
-      result = await MongoDatabase.signup(name, username, password);
+  Future<void> _startFirebaseSmsOtp() async {
+    final phone = _phoneController.text.trim();
+    if (phone.isEmpty || !phone.startsWith('+')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Enter phone in format +<countrycode><number>'),
+          backgroundColor: AppTheme.errorColor,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
     }
 
-    if (result == "success") {
-      // Fetch user details and update provider
-      final userMap = await MongoDatabase.getUser(username);
-      if (userMap != null && mounted) {
-        Provider.of<UserProvider>(context, listen: false).setUser(
-          userMap['_id'].toString(),
-          userMap['username'],
-          userMap['name'] ?? 'Admin',
-          userMap['shop_name'],
-          userMap['phone'],
-        );
-      }
-      setState(() => _isLoading = false);
-
-      if (mounted) {
-        Navigator.pushReplacementNamed(context, '/home');
-      }
-    } else {
-      setState(() => _isLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(result),
-            backgroundColor: AppTheme.errorColor,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
+    setState(() => _isLoading = true);
+    try {
+      await FirebaseAuth.instance.verifyPhoneNumber(
+        phoneNumber: phone,
+        timeout: const Duration(seconds: 60),
+        verificationCompleted: (PhoneAuthCredential credential) async {
+          try {
+            await FirebaseAuth.instance.signInWithCredential(credential);
+            await _syncUserIntoProvider();
+            if (!mounted) return;
+            Navigator.pushReplacementNamed(context, '/');
+          } catch (_) {
+            // fall back to manual entry
+          }
+        },
+        verificationFailed: (FirebaseAuthException e) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(e.message ?? e.code),
+              backgroundColor: AppTheme.errorColor,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        },
+        codeSent: (String verificationId, int? resendToken) {
+          if (!mounted) return;
+          Navigator.push(
+            context,
+            OtpVerificationScreen.route(
+              phoneNumber: phone,
+              verificationId: verificationId,
+              forceResendingToken: resendToken,
+            ),
+          );
+        },
+        codeAutoRetrievalTimeout: (_) {},
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -112,82 +213,72 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 24),
               Text(
-                _isLogin ? "Welcome Back!" : "Get Started",
+                "Welcome",
                 textAlign: TextAlign.center,
                 style: AppTheme.headingStyle,
               ),
               const SizedBox(height: 8),
               Text(
-                _isLogin
-                    ? "Login to manage your shop"
-                    : "Create an account to start selling",
+                "Sign in to manage your shop",
                 textAlign: TextAlign.center,
                 style: AppTheme.captionStyle.copyWith(fontSize: 16),
               ),
               const SizedBox(height: 48),
 
-              // Form
-              if (!_isLogin) ...[
-                CustomTextField(
-                  controller: _nameController,
-                  label: "Full Name",
-                  prefixIcon: Icons.badge_outlined,
-                ),
-                const SizedBox(height: 16),
-              ],
-              CustomTextField(
-                controller: _usernameController,
-                label: "Username",
-                prefixIcon: Icons.person_outline,
-              ),
-              const SizedBox(height: 16),
-              CustomTextField(
-                controller: _passwordController,
-                label: "Password",
-                prefixIcon: Icons.lock_outline,
-                obscureText: true,
-              ),
-
-              const SizedBox(height: 32),
-
-              // Action Button
               CustomButton(
-                text: _isLogin ? "Login" : "Sign Up",
+                text: "Continue with Google",
                 isLoading: _isLoading,
-                onPressed: _submit,
+                onPressed: _isLoading ? null : _signInWithGoogle,
+                icon: Icons.login,
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
 
-              // Toggle Button
               Row(
-                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(
-                    _isLogin
-                        ? "Don't have an account? "
-                        : "Already have an account? ",
-                    style: AppTheme.bodyStyle.copyWith(fontSize: 14),
+                  Expanded(
+                    child: Divider(color: Colors.grey.withValues(alpha: 0.4)),
                   ),
-                  GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        _isLogin = !_isLogin;
-                        // Clear fields when switching
-                        _usernameController.clear();
-                        _passwordController.clear();
-                        _nameController.clear();
-                      });
-                    },
-                    child: Text(
-                      _isLogin ? "Sign Up" : "Login",
-                      style: AppTheme.subHeadingStyle.copyWith(
-                        color: AppTheme.primaryColor,
-                        fontSize: 14,
-                      ),
-                    ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 12),
+                    child: Text('OR'),
+                  ),
+                  Expanded(
+                    child: Divider(color: Colors.grey.withValues(alpha: 0.4)),
                   ),
                 ],
+              ),
+
+              const SizedBox(height: 20),
+
+              CustomTextField(
+                controller: _phoneController,
+                label: "Phone Number (E.164)",
+                prefixIcon: Icons.phone_outlined,
+                keyboardType: TextInputType.phone,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                "Example: +919876543210 (WhatsApp recommended)",
+                style: AppTheme.captionStyle.copyWith(fontSize: 12),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+
+              CustomButton(
+                text: "Send OTP on WhatsApp (Recommended)",
+                isLoading: _isLoading,
+                onPressed: _isLoading
+                    ? null
+                    : () => _startOtp(channel: 'whatsapp'),
+                icon: Icons.chat_bubble_outline,
+              ),
+              const SizedBox(height: 12),
+              CustomButton(
+                text: "Send OTP by SMS",
+                isLoading: _isLoading,
+                onPressed: _isLoading ? null : _startFirebaseSmsOtp,
+                icon: Icons.sms_outlined,
               ),
             ],
           ),

@@ -1,7 +1,5 @@
-import 'package:mongo_dart/mongo_dart.dart';
-
 class Product {
-  final ObjectId id;
+  final String id;
   final String name;
   final double price;
   final int stock;
@@ -19,7 +17,6 @@ class Product {
 
   Map<String, dynamic> toMap() {
     return {
-      '_id': id,
       'name': name,
       'price': price,
       'stock': stock,
@@ -28,9 +25,9 @@ class Product {
     };
   }
 
-  factory Product.fromMap(Map<String, dynamic> map) {
+  factory Product.fromMap(Map<String, dynamic> map, {required String id}) {
     return Product(
-      id: map['_id'] as ObjectId,
+      id: id,
       name: map['name'] as String,
       price: (map['price'] as num).toDouble(),
       stock: map['stock'] as int,

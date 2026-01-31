@@ -4,9 +4,17 @@ import 'package:shop_app/providers/sales_provider.dart';
 import 'package:shop_app/utils/app_theme.dart';
 import 'package:shop_app/widgets/dashboard_card.dart';
 import 'package:intl/intl.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class HomeView extends StatelessWidget {
   const HomeView({super.key});
+
+  DateTime _asDateTime(dynamic value) {
+    if (value is DateTime) return value;
+    if (value is Timestamp) return value.toDate();
+    if (value is String) return DateTime.parse(value);
+    return DateTime.now();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -142,12 +150,7 @@ class HomeView extends StatelessWidget {
                                       TextButton(
                                         onPressed: () {
                                           Navigator.pop(context);
-                                          // Extract ID properly. It might be an ObjectId object or a string representation
-                                          String id = sale['_id'].toString();
-                                          // Clean up if it's in format ObjectId("...")
-                                          if (id.startsWith('ObjectId("')) {
-                                            id = id.substring(10, 34);
-                                          }
+                                          final id = (sale['id'] ?? '').toString();
 
                                           Provider.of<SalesProvider>(
                                             context,
@@ -216,7 +219,7 @@ class HomeView extends StatelessWidget {
                                 ),
                               ),
                               subtitle: Text(
-                                "${sale['platform'] ?? 'Offline'} • ${DateFormat('MMM d, h:mm a').format(DateTime.parse(sale['created_at'].toString()))}",
+                                "${sale['platform'] ?? 'Offline'} • ${DateFormat('MMM d, h:mm a').format(_asDateTime(sale['created_at']))}",
                                 style: AppTheme.captionStyle.copyWith(
                                   fontSize: 12,
                                 ),

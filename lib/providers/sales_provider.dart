@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:shop_app/services/mongodb_service.dart';
-import 'package:mongo_dart/mongo_dart.dart' as mongo;
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shop_app/services/firestore_service.dart';
 
 class SalesProvider extends ChangeNotifier {
   List<Map<String, dynamic>> _sales = [];
@@ -26,13 +26,22 @@ class SalesProvider extends ChangeNotifier {
   double get whatsappSales => _whatsappSales;
   double get onlineSales => _onlineSales;
 
+  final FirestoreService _firestore = FirestoreService();
+
+  DateTime _asDateTime(dynamic value) {
+    if (value is DateTime) return value;
+    if (value is Timestamp) return value.toDate();
+    if (value is String) return DateTime.parse(value);
+    return DateTime.now();
+  }
+
   Future<void> loadData() async {
     _isLoading = true;
     notifyListeners();
 
     try {
-      final salesData = await MongoDatabase.getSales();
-      final weeklySalesData = await MongoDatabase.getWeeklySales();
+      final salesData = await _firestore.getSales();
+      final weeklySalesData = await _firestore.getWeeklySales();
 
       // Calculate totals
       double total = 0;
@@ -49,7 +58,7 @@ class SalesProvider extends ChangeNotifier {
         double amount = (sale['amount'] as num).toDouble();
         total += amount;
 
-        DateTime date = DateTime.parse(sale['created_at']);
+        DateTime date = _asDateTime(sale['created_at']);
         if (date.year == now.year &&
             date.month == now.month &&
             date.day == now.day) {
@@ -91,25 +100,14 @@ class SalesProvider extends ChangeNotifier {
     try {
       // Optimistic update: remove from list immediately
       _sales.removeWhere(
-        (sale) =>
-            sale['_id'].toString() == 'ObjectId("$id")' ||
-            sale['_id'].toString() == id,
+        (sale) => (sale['id']?.toString() ?? '') == id,
       );
 
       // Recalculate totals
       _calculateTotals();
       notifyListeners();
 
-      // Perform actual delete
-      // ObjectId parsing might vary, keeping it robust
-      mongo.ObjectId objectId;
-      if (id.startsWith('ObjectId("') && id.endsWith('")')) {
-        objectId = mongo.ObjectId.fromHexString(id.substring(10, 34));
-      } else {
-        objectId = mongo.ObjectId.fromHexString(id);
-      }
-
-      await MongoDatabase.deleteSale(objectId);
+      await _firestore.deleteSale(id);
 
       // Reload to ensure sync (optional)
       await loadData();
@@ -136,7 +134,7 @@ class SalesProvider extends ChangeNotifier {
       double amount = (sale['amount'] as num).toDouble();
       total += amount;
 
-      DateTime date = DateTime.parse(sale['created_at']);
+      DateTime date = _asDateTime(sale['created_at']);
       if (date.year == now.year &&
           date.month == now.month &&
           date.day == now.day) {

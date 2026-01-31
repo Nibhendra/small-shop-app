@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:provider/provider.dart';
 import 'package:shop_app/providers/user_provider.dart';
 import 'package:shop_app/providers/sales_provider.dart';
 import 'package:shop_app/screens/home_view.dart';
-import 'package:shop_app/screens/analytics_view.dart';
 import 'package:shop_app/widgets/profile_settings_dialog.dart';
 
 import 'package:shop_app/screens/inventory_screen.dart';
@@ -22,8 +23,6 @@ class _HomeScreenState extends State<HomeScreen> {
   final List<Widget> _views = [
     const HomeView(),
     const InventoryScreen(),
-    Container(), // Placeholder for Add Sale (Index 2)
-    const AnalyticsView(),
   ];
 
   @override
@@ -80,7 +79,9 @@ class _HomeScreenState extends State<HomeScreen> {
               borderRadius: BorderRadius.circular(16),
             ),
             onSelected: (value) {
-              if (value == 'settings') {
+              if (value == 'profile') {
+                Navigator.pushNamed(context, '/profile');
+              } else if (value == 'settings') {
                 showDialog(
                   context: context,
                   builder: (context) => const ProfileSettingsDialog(),
@@ -99,11 +100,22 @@ class _HomeScreenState extends State<HomeScreen> {
                       TextButton(
                         onPressed: () {
                           Navigator.pop(context);
-                          Navigator.pushNamedAndRemoveUntil(
-                            context,
-                            '/login',
-                            (route) => false,
-                          );
+                          () async {
+                            try {
+                              await FirebaseAuth.instance.signOut();
+                              await GoogleSignIn().signOut();
+                            } catch (_) {}
+                            if (!context.mounted) return;
+                            Provider.of<UserProvider>(
+                              context,
+                              listen: false,
+                            ).clear();
+                            Navigator.pushNamedAndRemoveUntil(
+                              context,
+                              '/',
+                              (route) => false,
+                            );
+                          }();
                         },
                         child: const Text(
                           "Logout",
@@ -135,6 +147,16 @@ class _HomeScreenState extends State<HomeScreen> {
                       style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                     ),
                     const Divider(height: 24),
+                  ],
+                ),
+              ),
+              const PopupMenuItem<String>(
+                value: 'profile',
+                child: Row(
+                  children: [
+                    Icon(Icons.person_outline, size: 20, color: Colors.black87),
+                    SizedBox(width: 12),
+                    Text('Profile'),
                   ],
                 ),
               ),
@@ -191,6 +213,8 @@ class _HomeScreenState extends State<HomeScreen> {
               if (result == true) {
                 salesProvider.loadData();
               }
+            } else if (index == 3) {
+              await Navigator.pushNamed(context, '/profile');
             } else {
               setState(() => _currentIndex = index);
             }
@@ -222,9 +246,9 @@ class _HomeScreenState extends State<HomeScreen> {
               label: 'Add Sale',
             ),
             NavigationDestination(
-              icon: Icon(Icons.analytics_outlined),
-              selectedIcon: Icon(Icons.analytics, color: AppTheme.primaryColor),
-              label: 'Analytics',
+              icon: Icon(Icons.person_outline),
+              selectedIcon: Icon(Icons.person, color: AppTheme.primaryColor),
+              label: 'Profile',
             ),
           ],
         ),

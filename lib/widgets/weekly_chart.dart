@@ -1,11 +1,19 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class WeeklySalesChart extends StatelessWidget {
   final List<Map<String, dynamic>> salesData;
 
   const WeeklySalesChart({super.key, required this.salesData});
+
+  DateTime _asDateTime(dynamic value) {
+    if (value is DateTime) return value;
+    if (value is Timestamp) return value.toDate();
+    if (value is String) return DateTime.parse(value);
+    return DateTime.now();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -23,7 +31,7 @@ class WeeklySalesChart extends StatelessWidget {
       // Sum sales for this specific date
       double total = 0;
       for (var sale in salesData) {
-        DateTime saleDate = DateTime.parse(sale['created_at']);
+        DateTime saleDate = _asDateTime(sale['created_at']);
         if (saleDate.year == date.year &&
             saleDate.month == date.month &&
             saleDate.day == date.day) {

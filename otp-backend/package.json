@@ -1,0 +1,21 @@
+{
+  "name": "small-shop-app-otp-backend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "commonjs",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.19.2",
+    "firebase-admin": "^12.7.0",
+    "twilio": "^5.12.0"
+  }
+}

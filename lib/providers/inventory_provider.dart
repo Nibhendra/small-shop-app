@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:mongo_dart/mongo_dart.dart';
 import 'package:shop_app/models/product_model.dart';
-import 'package:shop_app/services/mongodb_service.dart';
+import 'package:shop_app/services/firestore_service.dart';
 
 class InventoryProvider with ChangeNotifier {
   List<Product> _products = [];
   bool _isLoading = false;
   String? _error;
+
+  final FirestoreService _firestore = FirestoreService();
 
   List<Product> get products => _products;
   bool get isLoading => _isLoading;
@@ -21,8 +22,15 @@ class InventoryProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      final productMaps = await MongoDatabase.getProducts();
-      _products = productMaps.map((map) => Product.fromMap(map)).toList();
+      final productMaps = await _firestore.getProducts();
+      _products = productMaps
+          .map(
+            (map) => Product.fromMap(
+              map,
+              id: map['id'] as String,
+            ),
+          )
+          .toList();
     } catch (e) {
       _error = e.toString();
     } finally {
@@ -41,15 +49,12 @@ class InventoryProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      final newProduct = Product(
-        id: ObjectId(),
+      await _firestore.addProduct(
         name: name,
         price: price,
         stock: stock,
         category: category,
       );
-
-      await MongoDatabase.addProduct(newProduct.toMap());
       await fetchProducts(); // Refresh list
     } catch (e) {
       _error = e.toString();
@@ -66,7 +71,10 @@ class InventoryProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      await MongoDatabase.updateProduct(product.toMap());
+      await _firestore.updateProduct(
+        productId: product.id,
+        fields: product.toMap(),
+      );
       final index = _products.indexWhere((p) => p.id == product.id);
       if (index != -1) {
         _products[index] = product;
@@ -80,12 +88,12 @@ class InventoryProvider with ChangeNotifier {
     }
   }
 
-  Future<void> deleteProduct(ObjectId id) async {
+  Future<void> deleteProduct(String id) async {
     _isLoading = true;
     notifyListeners();
 
     try {
-      await MongoDatabase.deleteProduct(id);
+      await _firestore.deleteProduct(id);
       _products.removeWhere((p) => p.id == id);
     } catch (e) {
       _error = e.toString();

@@ -1,26 +1,44 @@
 {
   "project_info": {
-    "project_number": "238267893138",
-    "project_id": "shop-entity-45a0a",
-    "storage_bucket": "shop-entity-45a0a.firebasestorage.app"
+    "project_number": "1027641129757",
+    "project_id": "vyapaar-app-9acc2",
+    "storage_bucket": "vyapaar-app-9acc2.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:238267893138:android:cb56174d0cee27e850ad4b",
+        "mobilesdk_app_id": "1:1027641129757:android:f6dcdf11841052ae9a7ff4",
         "android_client_info": {
           "package_name": "com.example.shop_app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "1027641129757-doagjo3q551mg9qugivpdtdbshfn7nts.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.shop_app",
+            "certificate_hash": "eb790787dfa8dedc710f90563b51ccf18187cc6d"
+          }
+        },
+        {
+          "client_id": "1027641129757-bj8tue3tueo81i136l7k5h52j43r47dm.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
-          "current_key": "AIzaSyBpgvhmDMyMw80o_pRiOqwuJQohm9AJ3ug"
+          "current_key": "AIzaSyD7w-YPasYWx0COb_puu5RYDeRH-lBV67M"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1027641129757-bj8tue3tueo81i136l7k5h52j43r47dm.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

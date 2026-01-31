@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shop_app/providers/user_provider.dart';
-import 'package:shop_app/services/mongodb_service.dart';
-import 'package:mongo_dart/mongo_dart.dart' as mongo;
+import 'package:shop_app/services/firestore_service.dart';
 import 'package:shop_app/widgets/custom_button.dart';
 import 'package:shop_app/widgets/custom_textfield.dart';
 
@@ -38,63 +37,18 @@ class _ProfileSettingsDialogState extends State<ProfileSettingsDialog> {
     final userProvider = Provider.of<UserProvider>(context, listen: false);
 
     try {
-      // Assuming ID is stored as hex string in provider, convert back to ObjectId
-      // Note: In a real app, you might store ObjectId directly or handle string conversion more robustly
-      String result = await MongoDatabase.updateUser(
-        mongo.ObjectId.parse(
-          userProvider.id.substring(10, 34),
-        ), // Extracting hex from "ObjectId("...")" if needed, or just parse if clean hex
+      await FirestoreService().updateUserProfile(
+        name: _nameController.text.trim(),
+        shopName: _shopNameController.text.trim(),
+      );
+
+      userProvider.updateProfile(
         _nameController.text.trim(),
         _shopNameController.text.trim(),
       );
 
-      // Handle the case where the ID string format might vary.
-      // Ideally UserProvider stores clean hex string or ObjectId.
-      // For now, let's try to update using the ID we have.
-      // If the ID in provider is "ObjectId("5f...")", we need to parse it.
-
-      // Let's rely on a simpler approach if possible or ensure ID is clean.
-      // Re-reading UserProvider: it stores .toString() of ObjectId.
-      // ObjectId.toString() usually returns 'ObjectId("hexstring")'.
-
-      // Let's parse safely
-      String idString = userProvider.id;
-      mongo.ObjectId objectId;
-      if (idString.startsWith('ObjectId("') && idString.endsWith('")')) {
-        objectId = mongo.ObjectId.fromHexString(idString.substring(10, 34));
-      } else {
-        objectId = mongo.ObjectId.fromHexString(idString);
-      }
-
-      result = await MongoDatabase.updateUser(
-        objectId,
-        _nameController.text.trim(),
-        _shopNameController.text.trim(),
-      );
-
-      if (result == "success") {
-        userProvider.updateProfile(
-          _nameController.text.trim(),
-          _shopNameController.text.trim(),
-        );
-        if (mounted) {
-          Navigator.pop(context);
-          // Success message removed to avoid UI collision.
-          // The dashboard updates immediately, providing sufficient feedback.
-        }
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text("Error: $result"),
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-              margin: const EdgeInsets.only(bottom: 80, left: 24, right: 24),
-            ),
-          );
-        }
+      if (mounted) {
+        Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
@@ -164,7 +118,13 @@ class _ProfileSettingsDialogState extends State<ProfileSettingsDialog> {
               ),
               const SizedBox(height: 16),
 
-              _buildReadOnlyField("Shop ID", "shop_${user.username}", ""),
+              _buildReadOnlyField(
+                "Shop ID",
+                user.id.isNotEmpty
+                    ? "shop_${user.id.substring(0, user.id.length >= 8 ? 8 : user.id.length)}"
+                    : "",
+                "",
+              ),
               const SizedBox(height: 24),
 
               SizedBox(

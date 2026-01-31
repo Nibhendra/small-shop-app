@@ -19,12 +19,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
   @override
   void initState() {
     super.initState();
-    Future.microtask(
-      () => Provider.of<InventoryProvider>(
-        context,
-        listen: false,
-      ).fetchProducts(),
-    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Provider.of<InventoryProvider>(context, listen: false).fetchProducts();
+    });
   }
 
   @override
@@ -130,7 +128,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     : ListView.separated(
                         padding: const EdgeInsets.all(20),
                         itemCount: filteredProducts.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 16),
+                      separatorBuilder: (context, index) =>
+                        const SizedBox(height: 16),
                         itemBuilder: (context, index) {
                           final product = filteredProducts[index];
                           final isLowStock =
